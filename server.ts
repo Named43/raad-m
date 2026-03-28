@@ -203,6 +203,117 @@ async function startServer() {
     }
   });
 
+  app.post("/api/mikrotik/check-card", async (req, res) => {
+    const { host, port, username, password, cardNumber } = req.body;
+    
+    if (!host || !username || password === undefined || !cardNumber) {
+      return res.status(400).json({ success: false, error: "الرجاء إدخال جميع البيانات المطلوبة" });
+    }
+
+    let cleanHost = host.trim();
+    try {
+      if (cleanHost.startsWith('http://') || cleanHost.startsWith('https://')) {
+        cleanHost = new URL(cleanHost).hostname;
+      } else if (cleanHost.includes('/')) {
+        cleanHost = cleanHost.split('/')[0];
+      }
+    } catch (e) {}
+
+    let client: RouterOSAPI | null = null;
+
+    try {
+      client = new RouterOSAPI({
+        host: cleanHost,
+        port: parseInt(port) || 8728,
+        user: username,
+        password: password,
+        timeout: 10000,
+        tls: parseInt(port) === 8729
+      });
+
+      client.on('error', (err) => {
+        console.error('RouterOSAPI Client Error:', err);
+      });
+
+      await client.connect();
+
+      let userFound = null;
+      let userType = '';
+
+      // Try Hotspot first
+      try {
+        const hsUsers = await client.write('/ip/hotspot/user/print', ['?name=' + cardNumber]);
+        if (hsUsers && hsUsers.length > 0) {
+          userFound = hsUsers[0];
+          userType = 'hotspot';
+        }
+      } catch(e) {}
+
+      // Try ROS v6 User Manager
+      if (!userFound) {
+        try {
+          const um6Users = await client.write('/tool/user-manager/user/print', ['?username=' + cardNumber]);
+          if (um6Users && um6Users.length > 0) {
+            userFound = um6Users[0];
+            userType = 'usermanager6';
+          }
+        } catch(e) {}
+      }
+
+      // Try ROS v7 User Manager
+      if (!userFound) {
+        try {
+          const um7Users = await client.write('/user-manager/user/print', ['?name=' + cardNumber]);
+          if (um7Users && um7Users.length > 0) {
+            userFound = um7Users[0];
+            userType = 'usermanager7';
+          }
+        } catch(e) {}
+      }
+
+      if (!userFound) {
+        return res.status(404).json({ success: false, error: "لم يتم العثور على الكرت" });
+      }
+
+      // Normalize data
+      let packageName = userFound.profile || userFound['actual-profile'] || userFound.group || 'غير محدد';
+      
+      let dataUsed = 0;
+      if (userType === 'hotspot') {
+        dataUsed = parseInt(userFound['bytes-in'] || '0') + parseInt(userFound['bytes-out'] || '0');
+      } else {
+        dataUsed = parseInt(userFound['download-used'] || '0') + parseInt(userFound['upload-used'] || '0');
+      }
+      
+      let dataLimit = parseInt(userFound['limit-bytes-total'] || userFound['transfer-limit'] || '0');
+      let timeUsed = userFound['uptime'] || userFound['uptime-used'] || '0s';
+      let timeLimit = userFound['limit-uptime'] || userFound['uptime-limit'] || '0s';
+
+      res.json({
+        success: true,
+        data: {
+          cardNumber,
+          package: packageName,
+          dataUsed,
+          dataLimit,
+          timeUsed,
+          timeLimit,
+          userType
+        }
+      });
+
+    } catch (error: any) {
+      console.error("MikroTik Check Card Error:", error);
+      res.status(500).json({ success: false, error: "فشل الاتصال بالراوتر للبحث عن الكرت" });
+    } finally {
+      if (client) {
+        try {
+          client.close().catch(() => {});
+        } catch (e) {}
+      }
+    }
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

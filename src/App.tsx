@@ -306,6 +306,48 @@ export default function App() {
   const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null);
   const previousActiveNeighbors = useRef<Set<string> | null>(null);
 
+  // Card Check State
+  const [showCardCheck, setShowCardCheck] = useState(false);
+  const [searchCardNumber, setSearchCardNumber] = useState('');
+  const [isCheckingCard, setIsCheckingCard] = useState(false);
+  const [cardResult, setCardResult] = useState<any>(null);
+  const [cardError, setCardError] = useState('');
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const handleCheckCard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchCardNumber.trim()) return;
+    
+    setIsCheckingCard(true);
+    setCardError('');
+    setCardResult(null);
+
+    try {
+      const response = await fetch('/api/mikrotik/check-card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, cardNumber: searchCardNumber.trim() })
+      });
+      const result = await response.json();
+      if (result.success) {
+        setCardResult(result.data);
+      } else {
+        setCardError(result.error || 'لم يتم العثور على الكرت');
+      }
+    } catch (err) {
+      setCardError('فشل الاتصال بالخادم');
+    } finally {
+      setIsCheckingCard(false);
+    }
+  };
+
   // Live ticking effect for uptime
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -594,6 +636,23 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             className="p-4 space-y-6 max-w-md mx-auto"
           >
+            {/* Card Check Button */}
+            <button
+              onClick={() => setShowCardCheck(true)}
+              className="w-full bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors active:scale-[0.98]"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+                  <FileText size={22} />
+                </div>
+                <div className="flex flex-col items-start">
+                  <span className="font-bold text-slate-900">فحص كرت المشترك</span>
+                  <span className="text-xs text-slate-500">معرفة الرصيد المتبقي والأيام</span>
+                </div>
+              </div>
+              <ChevronRight size={20} className="text-slate-400" />
+            </button>
+
             {/* Stats Grid */}
             <div className="grid grid-cols-2 gap-3">
               {/* Uptime */}
@@ -774,6 +833,116 @@ export default function App() {
           </motion.div>
         </div>
       )}
+
+      {/* Card Check Modal */}
+      <AnimatePresence>
+        {showCardCheck && (
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-4 sm:p-0">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCardCheck(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, y: 100, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 100, scale: 0.95 }}
+              className="relative w-full max-w-md bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                  <FileText className="text-indigo-500" size={24} />
+                  فحص كرت المشترك
+                </h3>
+                <button 
+                  onClick={() => setShowCardCheck(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <XCircle size={24} />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto">
+                <form onSubmit={handleCheckCard} className="flex gap-2 mb-6">
+                  <input
+                    type="text"
+                    value={searchCardNumber}
+                    onChange={(e) => setSearchCardNumber(e.target.value)}
+                    placeholder="أدخل رقم الكرت هنا..."
+                    className="flex-1 px-4 py-3.5 rounded-2xl bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all text-lg font-bold text-center"
+                    dir="ltr"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={isCheckingCard || !searchCardNumber.trim()}
+                    className={cn(
+                      "px-6 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.98] text-white rounded-2xl font-bold transition-all flex justify-center items-center shadow-lg shadow-indigo-600/20",
+                      (isCheckingCard || !searchCardNumber.trim()) && "opacity-70 cursor-not-allowed"
+                    )}
+                  >
+                    {isCheckingCard ? (
+                      <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      "فحص"
+                    )}
+                  </button>
+                </form>
+
+                {cardError && (
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="p-4 bg-red-50 text-red-700 rounded-2xl flex items-start gap-3 text-sm border border-red-100 mb-4">
+                    <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                    <p>{cardError}</p>
+                  </motion.div>
+                )}
+
+                {cardResult && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="space-y-4"
+                  >
+                    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-6 rounded-3xl text-white shadow-lg shadow-indigo-500/20 relative overflow-hidden">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-10 -mt-10"></div>
+                      <div className="absolute bottom-0 left-0 w-24 h-24 bg-black/10 rounded-full blur-xl -ml-8 -mb-8"></div>
+                      
+                      <div className="relative z-10">
+                        <div className="text-indigo-100 text-sm font-medium mb-1">الكرت أبو</div>
+                        <div className="text-3xl font-black mb-6">{cardResult.package}</div>
+                        
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-sm border border-white/10">
+                            <div className="text-indigo-100 text-xs mb-1">الرصيد المتبقي</div>
+                            <div className="font-bold text-lg" dir="ltr">
+                              {cardResult.dataLimit > 0 ? (
+                                formatBytes(Math.max(0, cardResult.dataLimit - cardResult.dataUsed))
+                              ) : (
+                                <span className="text-sm">مفتوح (مستخدم: {formatBytes(cardResult.dataUsed)})</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-sm border border-white/10">
+                            <div className="text-indigo-100 text-xs mb-1">الوقت المتبقي</div>
+                            <div className="font-bold text-sm">
+                              {cardResult.timeLimit !== '0s' ? (
+                                formatSecondsToArabicUptime(Math.max(0, parseMikrotikUptimeToSeconds(cardResult.timeLimit) - parseMikrotikUptimeToSeconds(cardResult.timeUsed)))
+                              ) : (
+                                <span className="text-xs">مفتوح (مستخدم: {formatSecondsToArabicUptime(parseMikrotikUptimeToSeconds(cardResult.timeUsed))})</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
