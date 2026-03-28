@@ -2,17 +2,19 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import { RouterOSAPI } from "node-routeros";
 import path from "path";
+import cors from "cors";
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors()); // Enable CORS for all origins
   app.use(express.json());
 
   app.post("/api/mikrotik/stats", async (req, res) => {
     const { host, port, username, password, deviceIps } = req.body;
     
-    if (!host || !username || !password) {
+    if (!host || !username || password === undefined) {
       return res.status(400).json({ success: false, error: "الرجاء إدخال جميع البيانات المطلوبة" });
     }
 
@@ -36,7 +38,8 @@ async function startServer() {
         port: parseInt(port) || 8728,
         user: username,
         password: password,
-        timeout: 10000
+        timeout: 10000,
+        tls: parseInt(port) === 8729
       });
 
       // Prevent unhandled error events from crashing the Node.js process
@@ -80,10 +83,16 @@ async function startServer() {
         { id: 'net_20_sada', name: 'شبكه رقم 20 على حصن سده', prefix: '172.17.50.' },
         { id: 'net_19_sada', name: 'شبكه رقم 19 على حصن سده', prefix: '172.17.7.' },
         { id: 'modem_saad_alsaba', name: 'مودم على بيت سعد السبع في سده', prefix: '172.17.10.' },
+        { id: 'modem_yaseen_sada', name: 'مودم على بيت ياسين في سده', prefix: '172.17.12.' },
         { id: 'modem_40_abu_mahdi', name: 'مودم رقم 40 على بيت ابو مهدي في ملاحه', prefix: '172.17.58.' },
         { id: 'modem_20_bazil', name: 'مودم رقم 20 في مجمع باذيل ملاحه', prefix: '172.17.36.' },
         { id: 'net_18_farasha', name: 'شبكه رقم 18 فوق الفراشه', prefix: '172.17.27.' },
         { id: 'modem_qir_farasha', name: 'مودم عند قير الفراشه', prefix: '172.17.5.' },
+        { id: 'net_92_alsakho', name: 'شبكه رقم 92 في السخو', prefix: '172.17.9.' },
+        { id: 'net_16_lmbarka', name: 'شبكه رقم 16 على حصن لمباركه', prefix: '172.17.25.' },
+        { id: 'net_17_lmbarka', name: 'شبكه رقم 17 على حصن لمباركه', prefix: '172.17.26.' },
+        { id: 'modem_abdullah_ali_lmbarka', name: 'مودم على بيت عبدالله علي في لمباركه', prefix: '172.17.3.' },
+        { id: 'modem_house_lmbarka', name: 'مودم غلى بيت في لمباركه', prefix: '172.17.4.' },
       ];
 
       let hotspotActiveCount = 0;
@@ -92,28 +101,34 @@ async function startServer() {
 
       if (deviceIps && Array.isArray(deviceIps) && deviceIps.length > 0) {
         try {
-          // Ping all devices concurrently for fast, real-time status
-          const pingPromises = deviceIps.map(async (ip) => {
-            try {
-              const result = await client!.write('/ping', ['=address=' + ip, '=count=1', '=interval=50ms']);
-              // result is an array of ping responses
-              const received = result.reduce((acc: number, curr: any) => acc + (parseInt(curr.received) || 0), 0);
-              if (received > 0) {
-                return ip;
+          // Ping devices in chunks to avoid overwhelming the router while keeping it fast
+          const chunkSize = 15;
+          for (let i = 0; i < deviceIps.length; i += chunkSize) {
+            const chunk = deviceIps.slice(i, i + chunkSize);
+            const pingPromises = chunk.map(async (ip) => {
+              try {
+                const result = await client!.write('/ping', ['=address=' + ip, '=count=1']);
+                if (result && result.length > 0) {
+                  // The last item usually contains the summary or the actual response
+                  const last = result[result.length - 1];
+                  if (last.received === '1' || parseInt(last.received) > 0) {
+                    return ip;
+                  }
+                }
+              } catch (e) {
+                // Ignore individual ping errors
               }
-            } catch (e) {
               return null;
-            }
-            return null;
-          });
-          
-          const results = await Promise.all(pingPromises);
-          activeNeighbors = results.filter(Boolean) as string[];
+            });
+            
+            const results = await Promise.all(pingPromises);
+            activeNeighbors.push(...(results.filter(Boolean) as string[]));
+          }
         } catch (e) {
-          console.warn("Could not ping devices:", e);
+          console.warn("Could not complete ping sweep:", e);
         }
       } else {
-        // Fallback to neighbor print if no specific IPs requested
+        // Fallback to neighbors if no IPs provided
         try {
           const neighbors = await client.write('/ip/neighbor/print');
           if (neighbors) {
@@ -139,6 +154,16 @@ async function startServer() {
         console.warn("Could not fetch hotspot active users (package might not be installed):", e);
       }
 
+      let logs: any[] = [];
+      try {
+        const logResult = await client.write('/log/print');
+        if (logResult && Array.isArray(logResult)) {
+          logs = logResult.slice(-50).reverse();
+        }
+      } catch (e) {
+        console.warn("Could not fetch logs:", e);
+      }
+
       if (resources && resources.length > 0) {
         res.json({ 
           success: true, 
@@ -146,7 +171,8 @@ async function startServer() {
             ...resources[0],
             hotspotActiveCount,
             networkCounts,
-            activeNeighbors
+            activeNeighbors,
+            logs
           } 
         });
       } else {

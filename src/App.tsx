@@ -1,7 +1,118 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle } from 'lucide-react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle, ChevronRight, MessageCircle, FileText } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Toaster, toast } from 'sonner';
 import { cn, parseMikrotikUptimeToSeconds, formatSecondsToArabicUptime } from './lib/utils';
+
+const translateLog = (message: string) => {
+  if (!message) return '';
+  let translated = message;
+  
+  const dictionary: Record<string, string> = {
+    'logged in': 'سجل دخوله',
+    'logged out': 'سجل خروجه',
+    'login failure': 'فشل تسجيل الدخول',
+    'connected': 'اتصل',
+    'disconnected': 'انقطع الاتصال',
+    'link up': 'الرابط متصل',
+    'link down': 'الرابط غير متصل',
+    'assigned': 'تم تعيين',
+    'deassigned': 'تم إلغاء تعيين',
+    'interface': 'المنفذ',
+    'system': 'النظام',
+    'error': 'خطأ',
+    'critical': 'حرج',
+    'warning': 'تحذير',
+    'info': 'معلومة',
+    'user': 'المستخدم',
+    'password': 'كلمة المرور',
+    'invalid': 'غير صالح',
+    'timeout': 'انتهى الوقت',
+    'reboot': 'إعادة تشغيل',
+    'shutdown': 'إيقاف تشغيل',
+    'started': 'بدأ',
+    'stopped': 'توقف',
+    'changed': 'تغير',
+    'added': 'أضيف',
+    'removed': 'أزيل',
+    'failed': 'فشل',
+    'success': 'نجاح',
+    'authentication': 'المصادقة',
+    'mac address': 'عنوان الماك',
+    'ip address': 'عنوان الآي بي',
+    'dhcp': 'خادم DHCP',
+    'hotspot': 'نقطة الاتصال',
+    'pppoe': 'PPPoE',
+    'wireless': 'الشبكة اللاسلكية',
+    'bridge': 'الجسر',
+    'route': 'المسار',
+    'firewall': 'جدار الحماية',
+    'filter': 'الفلتر',
+    'nat': 'النات',
+    'mangle': 'المانجل',
+    'queue': 'قائمة الانتظار',
+    'script': 'السكربت',
+    'scheduler': 'المجدول',
+    'up': 'يعمل',
+    'down': 'متوقف',
+    'from': 'من',
+    'to': 'إلى',
+    'via': 'عبر',
+    'by': 'بواسطة',
+    'on': 'على',
+    'in': 'في',
+    'out': 'خارج',
+    'for': 'لـ',
+    'with': 'مع',
+    'without': 'بدون'
+  };
+
+  for (const [eng, ar] of Object.entries(dictionary)) {
+    const regex = new RegExp(`\\b${eng}\\b`, 'gi');
+    translated = translated.replace(regex, ar);
+  }
+  
+  return translated;
+};
+
+const getDeviceNameByIp = (ip: string) => {
+  for (const line of TOPOLOGY) {
+    const device = line.devices.find(d => d.ip === ip);
+    if (device) return device.name;
+  }
+  return ip;
+};
+
+const playDisconnectAlert = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    
+    const playTone = (freq: number, type: OscillatorType, startTime: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.3, startTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+
+    const now = ctx.currentTime;
+    // Play a descending warning tone (two quick beeps)
+    playTone(800, 'square', now, 0.2);
+    playTone(600, 'square', now + 0.25, 0.4);
+  } catch (e) {
+    console.error("Audio play failed", e);
+  }
+};
 
 // Topology Definition for Neighbors
 const TOPOLOGY = [
@@ -18,25 +129,182 @@ const TOPOLOGY = [
       { ip: '192.168.11.31', name: 'ام فايف مستقبل فوق كريث', parentIp: '192.168.11.187' },
       { ip: '192.168.11.4', name: 'ام فايف فوق كريث مرسل للموادم', parentIp: '192.168.11.31' },
     ]
+  },
+  {
+    id: 'halqoum_safwa_bariya_line',
+    name: 'خط الحلقوم + صفوه +بيت الباريه',
+    devices: [
+      { ip: '192.168.11.5', name: 'مرسل من الرئيسي الى صفوه + الباريه +الحلقوم', parentIp: null },
+      { ip: '192.168.11.18', name: 'مستقبل الحلقوم', parentIp: '192.168.11.5' },
+      { ip: '192.168.11.198', name: 'مستقبل البيت الباريه', parentIp: '192.168.11.5' },
+      { ip: '192.168.11.208', name: 'مستقبل صفوه', parentIp: '192.168.11.5' },
+      { ip: '192.168.12.209', name: 'ام تو فوق صفوة رقم 11', parentIp: '192.168.11.208' },
+    ]
+  },
+  {
+    id: 'qarada_line',
+    name: 'خط قراضه',
+    devices: [
+      { ip: '192.168.11.191', name: 'مرسل من الريئسي الى الجعدن', parentIp: null },
+      { ip: '192.168.11.190', name: 'المستقبل في الجعدن من الرئيسي', parentIp: '192.168.11.191' },
+      { ip: '192.168.11.7', name: 'مرسل من الجعدن الى فوق قرضه', parentIp: '192.168.11.190' },
+      { ip: '192.168.11.174', name: 'مستقبل فوق قراضه من الجعدن', parentIp: '192.168.11.7' },
+      { ip: '192.168.12.146', name: 'ام تو رقم 10 فوق قراضه', parentIp: '192.168.11.174' },
+      { ip: '192.168.12.175', name: 'ام تو رقم 13 فوق قراضه', parentIp: '192.168.11.174' },
+      { ip: '192.168.11.6', name: 'ام فايف المرسل فوق قراضه للموادم', parentIp: '192.168.11.174' },
+    ]
+  },
+  {
+    id: 'alkoud_line',
+    name: 'خط من الريسي الى الكود',
+    devices: [
+      { ip: '192.168.11.8', name: 'مرسل من الرئيسي الى الكود', parentIp: null },
+      { ip: '192.168.11.9', name: 'مستقبل في الكود من الرئيسي', parentIp: '192.168.11.8' },
+      { ip: '192.168.11.10', name: 'مرسل من الكود الى الكوره فوق يبروم', parentIp: '192.168.11.9' },
+      { ip: '192.168.11.199', name: 'مرسل من الكود الى لقحل شروج الباكيلي', parentIp: '192.168.11.9' },
+    ]
+  },
+  {
+    id: 'alkoura_yabrom_daraoun_line',
+    name: 'خط الكود الى الكوره اضافه الى يبروم و درعون',
+    devices: [
+      { ip: '192.168.11.142', name: 'مستقبل في الكوره فوق يبروم من الكود', parentIp: null },
+      { ip: '192.168.11.141', name: 'مرسل من الكوره الى درعون', parentIp: '192.168.11.142' },
+      { ip: '192.168.11.57', name: 'مستقبل في درعون من الكوره على بيت ابو نايف', parentIp: '192.168.11.141' },
+      { ip: '192.168.12.74', name: 'ام تو رقم 12 فوق يبروم', parentIp: '192.168.11.142' },
+      { ip: '192.168.11.118', name: 'مرسل من الكوره الى بيوت يبروم وباخبيزان', parentIp: '192.168.11.142' },
+      { ip: '192.168.11.15', name: 'مستقبل على بيت باخبيزان من الكورة', parentIp: '192.168.11.118' },
+      { ip: '192.168.11.21', name: 'مستقبل عند بلبحيث من الكوره', parentIp: '192.168.11.118' },
+    ]
+  },
+  {
+    id: 'laqhal_shrouj_albakili_line',
+    name: 'خط موزع في لقحل على شروج الباكيلي',
+    devices: [
+      { ip: '192.168.11.194', name: 'مستقبل في لقحل من الكود', parentIp: null },
+      { ip: '192.168.11.19', name: 'مرسل الى من لقحل الى سده', parentIp: '192.168.11.194' },
+      { ip: '192.168.11.249', name: 'مستقبل على حصن سده من لقحل', parentIp: '192.168.11.19' },
+      { ip: '192.168.11.213', name: 'مرسل على على حصن سده الى السخو و الى البيوت في سده', parentIp: '192.168.11.249' },
+      { ip: '192.168.11.3', name: 'مستقبل في السخو من حصن سده', parentIp: '192.168.11.213' },
+      { ip: '192.168.12.122', name: 'ام تو رقم 92 في السخو', parentIp: '192.168.11.3' },
+      { ip: '192.168.11.211', name: 'مستقبل على بيت ياسين من حصن سده', parentIp: '192.168.11.213' },
+      { ip: '192.168.11.247', name: 'مرسل من لقحل الى ملاحه + الفراشه + مجمع بلعويد', parentIp: '192.168.11.194' },
+      { ip: '192.168.11.13', name: 'مستقبل في ملاحه من لقحل عند ابو مهدي', parentIp: '192.168.11.247' },
+      { ip: '192.168.11.108', name: 'مستقبل في ملاحه من لقحل على مجمع باذيل', parentIp: '192.168.11.247' },
+      { ip: '192.168.11.242', name: 'مستقبل فوق الفراشه من لقحل', parentIp: '192.168.11.247' },
+      { ip: '192.168.12.214', name: 'ام تو فوق الفراشه رقم 18', parentIp: '192.168.11.242' },
+      { ip: '192.168.11.43', name: 'مرسل من لقحل الى لمباركه', parentIp: '192.168.11.194' },
+      { ip: '192.168.11.44', name: 'مستقبل على حصن لمباركه من لقحل', parentIp: '192.168.11.43' },
+      { ip: '192.168.11.175', name: 'مرسل من حصن لمباركه الى البيوت في لمباركه', parentIp: '192.168.11.44' },
+      { ip: '192.168.12.108', name: 'ام تو رقم 16 على حصن لمباركه', parentIp: '192.168.11.44' },
+      { ip: '192.168.12.78', name: 'ام تو رقم 17 على حصن لمباركه', parentIp: '192.168.11.44' },
+      { ip: '192.168.11.41', name: 'مستقبل من حصن لمباركه على بيت عبدلله علي', parentIp: '192.168.11.175' },
+      { ip: '192.168.11.42', name: 'مستقبل من الحصن على بيت في لمباركه', parentIp: '192.168.11.175' },
+      { ip: '192.168.12.223', name: 'ام تو رقم13 في لقحل', parentIp: '192.168.11.194' },
+      { ip: '192.168.12.211', name: 'ام تو رقم 14 في لقحل', parentIp: '192.168.11.194' },
+    ]
   }
 ];
 
 const DEVICE_IPS = TOPOLOGY.flatMap(line => line.devices.map(d => d.ip));
 
+const SplashScreen = ({ onComplete }: { onComplete: () => void }) => {
+  const [progress, setProgress] = useState(0);
+  const [text, setText] = useState('');
+  const fullText = "تطوير م.صلاح بارحيم";
+
+  useEffect(() => {
+    const duration = 8000;
+    const intervalTime = 50;
+    const steps = duration / intervalTime;
+    let currentStep = 0;
+
+    const progressInterval = setInterval(() => {
+      currentStep++;
+      setProgress(Math.min((currentStep / steps) * 100, 100));
+      if (currentStep >= steps) {
+        clearInterval(progressInterval);
+        setTimeout(onComplete, 200);
+      }
+    }, intervalTime);
+
+    let charIndex = 0;
+    const typeWriterInterval = setInterval(() => {
+      if (charIndex <= fullText.length) {
+        setText(fullText.slice(0, charIndex));
+        charIndex++;
+      } else {
+        clearInterval(typeWriterInterval);
+      }
+    }, 150);
+
+    return () => {
+      clearInterval(progressInterval);
+      clearInterval(typeWriterInterval);
+    };
+  }, [onComplete]);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white p-6"
+      dir="rtl"
+    >
+      <div className="flex-1 flex flex-col items-center justify-center w-full max-w-md">
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="mb-8 w-full flex flex-col items-center"
+        >
+          <div className="w-24 h-24 bg-blue-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-blue-600/50 mb-6">
+            <Server size={48} strokeWidth={1.5} className="text-white" />
+          </div>
+          <h1 className="text-3xl font-bold text-center mb-2">رعد نت</h1>
+          <p className="text-blue-200 text-center text-sm opacity-80">صمم هذا التطبيق خصيصا لشبكه رعد نت</p>
+        </motion.div>
+
+        <div className="w-full mt-12 space-y-2">
+          <div className="flex justify-between text-xs font-medium text-blue-200 px-1">
+            <span>جاري التحميل...</span>
+            <span dir="ltr">{Math.round(progress)}%</span>
+          </div>
+          <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+            <motion.div 
+              className="h-full bg-blue-500 rounded-full"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="pt-6 flex items-center justify-center">
+            <p className="text-white text-lg font-bold font-mono tracking-wide" dir="rtl">
+              {text}
+              <span className="animate-pulse inline-block w-2 h-5 bg-blue-500 mr-1.5 align-middle rounded-sm"></span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   
   const [formData, setFormData] = useState({
-    host: '',
-    port: '8728',
-    username: 'admin',
+    host: 'remote.alnooah.pro',
+    port: '21153',
+    username: 'salah',
     password: ''
   });
 
   const [stats, setStats] = useState<any>(null);
   const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null);
+  const previousActiveNeighbors = useRef<Set<string> | null>(null);
 
   // Live ticking effect for uptime
   useEffect(() => {
@@ -51,29 +319,69 @@ export default function App() {
 
   // Periodic polling for live updates
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isLoggedIn) {
-      interval = setInterval(async () => {
-        try {
-          const response = await fetch('/api/mikrotik/stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...formData, deviceIps: DEVICE_IPS })
-          });
+    let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
+
+    const pollData = async () => {
+      if (!isLoggedIn) return;
+      
+      try {
+        const response = await fetch(`/api/mikrotik/stats`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...formData, deviceIps: DEVICE_IPS })
+        });
+        
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
           const result = await response.json();
-          if (result.success) {
+          if (result.success && isMounted) {
             setStats(result.data);
-            // Sync uptime occasionally to prevent drift
             if (result.data.uptime) {
               setUptimeSeconds(parseMikrotikUptimeToSeconds(result.data.uptime));
             }
+            
+            // Check for disconnections
+            if (result.data.activeNeighbors) {
+              const currentActive = new Set<string>(result.data.activeNeighbors);
+              
+              if (previousActiveNeighbors.current) {
+                const disconnectedIps = Array.from(previousActiveNeighbors.current).filter(ip => !currentActive.has(ip));
+                
+                if (disconnectedIps.length > 0) {
+                  playDisconnectAlert();
+                  disconnectedIps.forEach(ip => {
+                    const deviceName = getDeviceNameByIp(ip);
+                    toast.error(`انقطاع الاتصال: ${deviceName}`, {
+                      description: `القطعة (${ip}) فقدت الاتصال بالشبكة للتو!`,
+                      duration: 10000,
+                    });
+                  });
+                }
+              }
+              
+              previousActiveNeighbors.current = currentActive;
+            }
           }
-        } catch (err) {
-          console.error('فشل التحديث اللحظي للبيانات:', err);
         }
-      }, 5000); // تحديث كل 5 ثواني
+      } catch (err) {
+        console.error('فشل التحديث اللحظي للبيانات:', err);
+      } finally {
+        if (isMounted && isLoggedIn) {
+          timeoutId = setTimeout(pollData, 3000);
+        }
+      }
+    };
+
+    if (isLoggedIn) {
+      // Start polling
+      timeoutId = setTimeout(pollData, 3000);
     }
-    return () => clearInterval(interval);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
   }, [isLoggedIn, formData]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -86,11 +394,16 @@ export default function App() {
     setError('');
 
     try {
-      const response = await fetch('/api/mikrotik/stats', {
+      const response = await fetch(`/api/mikrotik/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...formData, deviceIps: DEVICE_IPS })
       });
+
+      const contentType = response.headers.get("content-type");
+      if (!contentType || contentType.indexOf("application/json") === -1) {
+        throw new Error("استجابة غير صالحة من الخادم.");
+      }
 
       const result = await response.json();
 
@@ -103,8 +416,9 @@ export default function App() {
       } else {
         setError(result.error || 'حدث خطأ غير معروف');
       }
-    } catch (err) {
-      setError('فشل الاتصال بالخادم الداخلي');
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'فشل الاتصال بالخادم الداخلي. تأكد من اتصالك بالإنترنت وصحة رابط الخادم.');
     } finally {
       setIsLoading(false);
     }
@@ -121,7 +435,7 @@ export default function App() {
     const villages = [
       'الباريه', 'كراثه', 'صفوه', 'الحلقوم', 'كريث', 
       'قراضه', 'يبروم', 'درعون', 'سده', 'ملاحه', 
-      'الفراشه', 'الراك', 'لقحل'
+      'الفراشه', 'الراك', 'لقحل', 'السخو', 'لمباركه'
     ];
     return stats.networkCounts.reduce((acc: any, net: any) => {
       let foundVillage = 'كراثه';
@@ -145,7 +459,6 @@ export default function App() {
     });
   }, [groupedNetworks]);
 
-  // Calculate device status based on active neighbors
   const deviceStatuses = React.useMemo(() => {
     if (!stats?.activeNeighbors) return {};
     
@@ -158,8 +471,6 @@ export default function App() {
         
         let isRootCause = false;
         if (!isOnline) {
-          // It's offline. Is it the root cause?
-          // It's the root cause if it has no parent, OR its parent IS online.
           if (!device.parentIp) {
             isRootCause = true;
           } else {
@@ -178,176 +489,147 @@ export default function App() {
   }, [stats?.activeNeighbors]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans" dir="rtl">
-      <div className="max-w-4xl mx-auto p-6 pt-12">
-        
-        <header className="mb-12 text-center relative">
-          <div className="inline-flex items-center justify-center p-3 bg-blue-100 text-blue-600 rounded-2xl mb-4">
-            <Server size={32} />
-          </div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">لوحة تحكم ميكروتك</h1>
-          <p className="text-slate-500">راقب حالة الراوتر الخاص بك بسهولة</p>
-          {isLoggedIn && (
-            <div className="absolute top-0 left-0 flex items-center gap-2 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-full text-sm font-medium border border-emerald-100">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              تحديث لحظي
-            </div>
-          )}
-        </header>
-
-        {!isLoggedIn ? (
+    <div className="min-h-[100dvh] bg-slate-50 text-slate-900 font-sans select-none" dir="rtl">
+      <Toaster position="top-center" richColors theme="light" dir="rtl" />
+      <AnimatePresence>
+        {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
+      </AnimatePresence>
+      
+      {!isLoggedIn ? (
+        // Mobile-First Login Screen
+        <div className="min-h-[100dvh] flex flex-col justify-center p-6 max-w-md mx-auto">
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-8"
+            className="w-full"
           >
-            <h2 className="text-xl font-semibold mb-6 flex items-center gap-2">
-              <LogIn size={20} className="text-slate-400" />
-              تسجيل الدخول للراوتر
-            </h2>
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center justify-center p-4 bg-blue-600 text-white rounded-3xl mb-6 shadow-lg shadow-blue-600/20">
+                <Server size={40} strokeWidth={1.5} />
+              </div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">رعد نت</h1>
+              <p className="text-slate-500 text-sm">تسجيل الدخول للوحة المراقبة</p>
+            </div>
 
             {error && (
-              <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-xl flex items-start gap-3 text-sm">
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="mb-6 p-4 bg-red-50 text-red-700 rounded-2xl flex items-start gap-3 text-sm border border-red-100">
                 <AlertCircle size={18} className="shrink-0 mt-0.5" />
                 <p>{error}</p>
-              </div>
+              </motion.div>
             )}
 
             <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">عنوان الـ IP أو الرابط (Domain)</label>
-                <input 
-                  type="text"
-                  name="host"
-                  required
-                  placeholder="مثال: 192.168.88.1 أو myrouter.net"
-                  value={formData.host}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-left"
-                  dir="ltr"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">منفذ الـ API</label>
-                <input 
-                  type="text"
-                  name="port"
-                  placeholder="8728"
-                  value={formData.port}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-left"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">اسم المستخدم</label>
-                <input 
-                  type="text"
-                  name="username"
-                  required
-                  value={formData.username}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-left"
-                  dir="ltr"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">كلمة المرور</label>
-                <input 
-                  type="password"
-                  name="password"
-                  value={formData.password}
-                  onChange={handleInputChange}
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-left"
-                  dir="ltr"
-                />
+              <div className="space-y-4 bg-white p-2 rounded-3xl shadow-sm border border-slate-100">
+                <div className="px-2 pb-2 pt-2">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1.5 px-2">كلمة المرور</label>
+                  <input 
+                    type="password"
+                    name="password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    className="w-full px-4 py-3.5 rounded-2xl bg-slate-50 border-transparent focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-left text-lg"
+                    dir="ltr"
+                    autoFocus
+                  />
+                </div>
               </div>
 
               <button 
                 type="submit"
                 disabled={isLoading}
                 className={cn(
-                  "w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all mt-6 flex justify-center items-center gap-2",
+                  "w-full py-4 px-4 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white rounded-2xl font-bold text-lg transition-all mt-8 flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20",
                   isLoading && "opacity-70 cursor-not-allowed"
                 )}
               >
                 {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <>
                     تسجيل الدخول
+                    <LogIn size={20} />
                   </>
                 )}
               </button>
             </form>
-          </motion.div>
-        ) : (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="space-y-6"
-          >
-            <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-medium text-slate-700">متصل بـ <span dir="ltr" className="text-slate-900">{formData.host}</span></span>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+
+            <div className="mt-12">
+              <a 
+                href="https://wa.me/967770932655" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="w-full py-4 px-4 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 rounded-2xl font-bold text-sm transition-all flex justify-center items-center gap-2"
               >
-                <LogOut size={16} />
-                تسجيل الخروج
-              </button>
+                <MessageCircle size={20} />
+                احصل على تطبيق مماثل لهذا خاص بشبكتك
+              </a>
             </div>
+          </motion.div>
+        </div>
+      ) : (
+        // Mobile-First Dashboard
+        <div className="pb-20">
+          {/* Sticky App Bar */}
+          <div className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200 shadow-sm px-4 py-3 flex justify-between items-center">
+            <div className="flex items-center gap-2">
+              <div className="relative flex h-3 w-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs text-slate-500 font-medium">متصل بـ</span>
+                <span className="text-sm font-bold text-slate-900">رعد نت</span>
+              </div>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors active:scale-95"
+            >
+              <LogOut size={22} />
+            </button>
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              {/* Uptime Card */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                <div className="flex items-center gap-3 mb-4 text-blue-600">
-                  <div className="p-2 bg-blue-50 rounded-lg">
-                    <Clock size={24} />
-                  </div>
-                  <h3 className="font-semibold text-slate-700">مدة التشغيل</h3>
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 space-y-6 max-w-md mx-auto"
+          >
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Uptime */}
+              <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
+                <div className="flex items-center gap-2 mb-3 text-blue-600">
+                  <Clock size={18} />
+                  <span className="text-xs font-bold text-slate-600">التشغيل</span>
                 </div>
-                <div className="text-xl font-bold text-slate-900 mt-auto leading-relaxed">
-                  {uptimeSeconds !== null ? formatSecondsToArabicUptime(uptimeSeconds) : 'غير متوفر'}
+                <div className="text-lg font-bold text-slate-900 mt-auto leading-tight">
+                  {uptimeSeconds !== null ? formatSecondsToArabicUptime(uptimeSeconds) : '--'}
                 </div>
-                <p className="text-sm text-slate-500 mt-1">الوقت المنقضي منذ آخر إعادة تشغيل</p>
               </div>
 
-              {/* Version Card */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                <div className="flex items-center gap-3 mb-4 text-indigo-600">
-                  <div className="p-2 bg-indigo-50 rounded-lg">
-                    <Activity size={24} />
-                  </div>
-                  <h3 className="font-semibold text-slate-700">إصدار النظام</h3>
+              {/* Users */}
+              <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
+                <div className="flex items-center gap-2 mb-3 text-orange-600">
+                  <Users size={18} />
+                  <span className="text-xs font-bold text-slate-600">إجمالي عدد المتصلين</span>
                 </div>
-                <div className="text-2xl font-bold text-slate-900 mt-auto" dir="ltr">
-                  v{stats?.version || 'غير متوفر'}
+                <div className="text-2xl font-black text-slate-900 mt-auto" dir="ltr">
+                  {stats?.hotspotActiveCount ?? '0'}
                 </div>
-                <p className="text-sm text-slate-500 mt-1">نسخة RouterOS المثبتة</p>
               </div>
 
-              {/* CPU Card */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                <div className="flex items-center gap-3 mb-4 text-emerald-600">
-                  <div className="p-2 bg-emerald-50 rounded-lg">
-                    <Cpu size={24} />
+              {/* CPU */}
+              <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col col-span-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-emerald-600">
+                    <Cpu size={18} />
+                    <span className="text-xs font-bold text-slate-600">المعالج</span>
                   </div>
-                  <h3 className="font-semibold text-slate-700">حالة المعالج</h3>
+                  <div className="text-lg font-bold text-slate-900" dir="ltr">
+                    {stats?.['cpu-load'] || '0'}%
+                  </div>
                 </div>
-                <div className="text-2xl font-bold text-slate-900 mt-auto flex items-baseline gap-1" dir="ltr">
-                  {stats?.['cpu-load'] || '0'} <span className="text-lg text-slate-500">%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
                   <div 
                     className={cn(
                       "h-full rounded-full transition-all duration-1000",
@@ -357,42 +639,63 @@ export default function App() {
                     style={{ width: `${stats?.['cpu-load'] || 0}%` }}
                   />
                 </div>
-                <p className="text-sm text-slate-500 mt-2">استهلاك المعالج الحالي</p>
-              </div>
-
-              {/* Hotspot Active Card */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col">
-                <div className="flex items-center gap-3 mb-4 text-orange-600">
-                  <div className="p-2 bg-orange-50 rounded-lg">
-                    <Users size={24} />
-                  </div>
-                  <h3 className="font-semibold text-slate-700">عدد المتصلين بالشبكه</h3>
-                </div>
-                <div className="text-2xl font-bold text-slate-900 mt-auto" dir="ltr">
-                  {stats?.hotspotActiveCount ?? '0'}
-                </div>
-                <p className="text-sm text-slate-500 mt-1">عدد المستخدمين النشطين حالياً</p>
               </div>
             </div>
 
-            {/* Neighbors Monitoring Section */}
-            {stats?.activeNeighbors && (
-              <div className="mt-12">
-                <div className="flex items-center gap-3 mb-8">
-                  <div className="p-2 bg-rose-100 text-rose-600 rounded-xl">
-                    <ShieldAlert size={24} />
-                  </div>
-                  <h2 className="text-2xl font-bold text-slate-800">مراقبة قطع الشبكة</h2>
+            {/* Networks Section */}
+            {stats?.networkCounts && stats.networkCounts.length > 0 && (
+              <div className="pt-2">
+                <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 px-1">
+                  <Wifi size={20} className="text-purple-500" />
+                  المتصلين حسب القرية
+                </h2>
+                
+                <div className="space-y-3">
+                  {sortedVillages.map((village) => (
+                    <div key={village} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
+                        <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                          <div className="w-1.5 h-4 bg-purple-500 rounded-full" />
+                          {village}
+                        </h3>
+                      </div>
+                      <div className="divide-y divide-slate-50">
+                        {groupedNetworks[village].map((net: any) => (
+                          <div key={net.id} className="flex items-center justify-between p-4">
+                            <div className="flex items-center gap-3">
+                              <Network size={16} className="text-slate-400" />
+                              <span className="text-sm font-semibold text-slate-700">{net.name}</span>
+                            </div>
+                            <div className="bg-purple-50 text-purple-700 font-bold px-3 py-1 rounded-xl text-sm" dir="ltr">
+                              {net.count}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              </div>
+            )}
 
-                <div className="space-y-8">
+            {/* Topology Section */}
+            {stats?.activeNeighbors && (
+              <div className="pt-2">
+                <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 px-1">
+                  <ShieldAlert size={20} className="text-rose-500" />
+                  مراقبة قطع الشبكة
+                </h2>
+
+                <div className="space-y-4">
                   {TOPOLOGY.map((line) => (
-                    <div key={line.id} className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                      <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <span className="w-2 h-6 bg-rose-500 rounded-full inline-block"></span>
-                        {line.name}
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                    <div key={line.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
+                        <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                          <div className="w-1.5 h-4 bg-rose-500 rounded-full" />
+                          {line.name}
+                        </h3>
+                      </div>
+                      <div className="p-4 space-y-3">
                         {line.devices.map((device) => {
                           const status = deviceStatuses[device.ip];
                           const isOnline = status?.isOnline ?? false;
@@ -402,38 +705,33 @@ export default function App() {
                             <div 
                               key={device.ip} 
                               className={cn(
-                                "p-5 rounded-2xl shadow-sm border flex flex-col transition-all",
-                                isOnline ? "bg-white border-emerald-200" : 
-                                isRootCause ? "bg-red-50 border-red-300 shadow-red-100" : "bg-slate-100 border-slate-200 opacity-75"
+                                "flex items-center gap-3 p-3 rounded-2xl border transition-all",
+                                isOnline ? "bg-white border-slate-100" : 
+                                isRootCause ? "bg-red-50 border-red-200" : "bg-slate-50 border-slate-100 opacity-60"
                               )}
                             >
-                              <div className="flex items-start justify-between mb-3">
-                                <div className={cn(
-                                  "flex items-center gap-2",
-                                  isOnline ? "text-emerald-600" : "text-red-600"
-                                )}>
-                                  {isOnline ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
-                                  <span className="text-sm font-bold">
-                                    {isOnline ? 'متصل' : 'غير متصل'}
+                              <div className={cn(
+                                "w-10 h-10 rounded-full flex items-center justify-center shrink-0",
+                                isOnline ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-red-600"
+                              )}>
+                                {isOnline ? <CheckCircle2 size={20} /> : <XCircle size={20} />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-bold text-sm text-slate-800 break-words leading-tight">{device.name}</h4>
+                                <div className="text-xs text-slate-500 mt-1 mb-2" dir="ltr">{device.ip}</div>
+                                <div className="flex items-center gap-1.5">
+                                  <div className="relative flex h-2 w-2">
+                                    {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                                    <span className={cn("relative inline-flex rounded-full h-2 w-2", isOnline ? "bg-emerald-500" : "bg-red-500")}></span>
+                                  </div>
+                                  <span className={cn("text-xs font-bold", isOnline ? "text-emerald-600" : "text-red-600")}>
+                                    {isOnline ? "متصل بالشبكة" : "غير متصل بالشبكة"}
                                   </span>
                                 </div>
                               </div>
-                              <h4 className={cn(
-                                "font-semibold text-sm mb-4 leading-relaxed",
-                                isOnline ? "text-slate-700" : "text-slate-800"
-                              )}>
-                                {device.name}
-                              </h4>
-                              
                               {isRootCause && (
-                                <div className="mt-auto bg-red-100 text-red-700 text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-2">
-                                  <AlertCircle size={14} />
-                                  الخلل في هذه القطعة
-                                </div>
-                              )}
-                              {!isOnline && !isRootCause && (
-                                <div className="mt-auto text-slate-500 text-xs font-medium px-1">
-                                  مفصول بسبب انقطاع قبله
+                                <div className="shrink-0 bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded-lg">
+                                  الخلل هنا
                                 </div>
                               )}
                             </div>
@@ -446,49 +744,36 @@ export default function App() {
               </div>
             )}
 
-            {/* Networks Section */}
-            {stats?.networkCounts && stats.networkCounts.length > 0 && (
-              <div className="mt-12">
-                <div className="flex items-center gap-3 mb-8">
-                  <div className="p-2 bg-purple-100 text-purple-600 rounded-xl">
-                    <Wifi size={24} />
-                  </div>
-                  <h2 className="text-2xl font-bold text-slate-800">إحصائيات الشبكات حسب القرية</h2>
-                </div>
-                
-                <div className="space-y-8">
-                  {sortedVillages.map((village) => (
-                    <div key={village} className="bg-slate-50/50 p-6 rounded-3xl border border-slate-100">
-                      <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                        <span className="w-2 h-6 bg-purple-500 rounded-full inline-block"></span>
-                        {village}
-                      </h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {groupedNetworks[village].map((net: any) => (
-                          <div key={net.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col hover:shadow-md transition-shadow">
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex items-center gap-2 text-purple-600">
-                                <Network size={18} />
-                              </div>
-                            </div>
-                            <h4 className="font-semibold text-slate-700 text-sm mb-4 leading-relaxed">{net.name}</h4>
-                            <div className="mt-auto flex items-end justify-between">
-                              <span className="text-sm text-slate-500">عدد المتصلين:</span>
-                              <div className="text-2xl font-bold text-slate-900" dir="ltr">
-                                {net.count}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+            {/* Logs Section */}
+            {stats?.logs && stats.logs.length > 0 && (
+              <div className="pt-2">
+                <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 px-1">
+                  <FileText size={20} className="text-blue-500" />
+                  سجل الأحداث (Logs)
+                </h2>
+
+                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden p-4">
+                  <ol className="list-decimal list-inside space-y-3">
+                    {stats.logs.map((log: any, index: number) => (
+                      <li key={log['.id'] || index} className="text-sm font-medium text-slate-800 leading-relaxed border-b border-slate-50 pb-3 last:border-0 last:pb-0">
+                        <div className="inline-flex items-center gap-2 mr-2">
+                          <span className="text-xs font-bold text-slate-500" dir="ltr">{log.time}</span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wider">
+                            {log.topics}
+                          </span>
+                        </div>
+                        <p className="mt-1 mr-6 text-slate-700">
+                          {translateLog(log.message)}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
                 </div>
               </div>
             )}
           </motion.div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
