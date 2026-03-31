@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle, ChevronRight, MessageCircle, FileText } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle, ChevronRight, MessageCircle, FileText, RefreshCw, MapPin, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { cn, parseMikrotikUptimeToSeconds, formatSecondsToArabicUptime } from './lib/utils';
@@ -188,6 +188,8 @@ const TOPOLOGY = [
       { ip: '192.168.11.3', name: 'مستقبل في السخو من حصن سده', parentIp: '192.168.11.213' },
       { ip: '192.168.12.122', name: 'ام تو رقم 92 في السخو', parentIp: '192.168.11.3' },
       { ip: '192.168.11.211', name: 'مستقبل على بيت ياسين من حصن سده', parentIp: '192.168.11.213' },
+      { ip: '192.168.12.20', name: 'شبكه ام تو رقم 20 على حصن سده', parentIp: '192.168.11.213' },
+      { ip: '192.168.12.33', name: 'شبكه رقم 19 على حصن سده', parentIp: '192.168.11.213' },
       { ip: '192.168.11.247', name: 'مرسل من لقحل الى ملاحه + الفراشه + مجمع بلعويد', parentIp: '192.168.11.194' },
       { ip: '192.168.11.13', name: 'مستقبل في ملاحه من لقحل عند ابو مهدي', parentIp: '192.168.11.247' },
       { ip: '192.168.11.108', name: 'مستقبل في ملاحه من لقحل على مجمع باذيل', parentIp: '192.168.11.247' },
@@ -199,14 +201,12 @@ const TOPOLOGY = [
       { ip: '192.168.12.108', name: 'ام تو رقم 16 على حصن لمباركه', parentIp: '192.168.11.44' },
       { ip: '192.168.12.78', name: 'ام تو رقم 17 على حصن لمباركه', parentIp: '192.168.11.44' },
       { ip: '192.168.11.41', name: 'مستقبل من حصن لمباركه على بيت عبدلله علي', parentIp: '192.168.11.175' },
-      { ip: '192.168.11.42', name: 'مستقبل من الحصن على بيت في لمباركه', parentIp: '192.168.11.175' },
+      { ip: '192.168.11.42', name: 'مستقبل من حصن لمباركه على بيت عماد محمد في لمباركه', parentIp: '192.168.11.175' },
       { ip: '192.168.12.223', name: 'ام تو رقم13 في لقحل', parentIp: '192.168.11.194' },
       { ip: '192.168.12.211', name: 'ام تو رقم 14 في لقحل', parentIp: '192.168.11.194' },
     ]
   }
 ];
-
-const DEVICE_IPS = TOPOLOGY.flatMap(line => line.devices.map(d => d.ip));
 
 const SplashScreen = ({ onComplete }: { onComplete: () => void }) => {
   const [progress, setProgress] = useState(0);
@@ -289,6 +289,67 @@ const SplashScreen = ({ onComplete }: { onComplete: () => void }) => {
   );
 };
 
+const formatMikrotikTime = (timeStr: string) => {
+  if (!timeStr || timeStr === 'غير معروف' || timeStr === 'لا يزال متصلاً') return { time: timeStr, date: '' };
+  
+  let timePart = timeStr;
+  let datePart = '';
+  
+  if (timeStr.includes(' ')) {
+    const parts = timeStr.split(' ');
+    datePart = parts[0];
+    timePart = parts[1];
+  }
+  
+  const timeMatch = timePart.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+  if (timeMatch) {
+    let hours = parseInt(timeMatch[1], 10);
+    const minutes = timeMatch[2];
+    const seconds = timeMatch[3];
+    
+    // Add 3 hours offset
+    hours = (hours + 3) % 24;
+    
+    // Convert to 12-hour format
+    const ampm = hours >= 12 ? 'م' : 'ص';
+    const hours12 = hours % 12 || 12;
+    
+    const hoursStr = hours12.toString().padStart(2, '0');
+    
+    return { time: `${hoursStr}:${minutes}:${seconds} ${ampm}`, date: datePart };
+  }
+  
+  return { time: timeStr, date: '' };
+};
+
+const formatUptimeArabic = (uptimeStr: string) => {
+  if (!uptimeStr || uptimeStr === '0s') return '0 ثانية';
+  
+  let hours = 0, minutes = 0, seconds = 0;
+  
+  const wMatch = uptimeStr.match(/(\d+)w/);
+  const dMatch = uptimeStr.match(/(\d+)d/);
+  const hMatch = uptimeStr.match(/(\d+)h/);
+  const mMatch = uptimeStr.match(/(\d+)m/);
+  const sMatch = uptimeStr.match(/(\d+)s/);
+  
+  if (wMatch) hours += parseInt(wMatch[1], 10) * 24 * 7;
+  if (dMatch) hours += parseInt(dMatch[1], 10) * 24;
+  if (hMatch) hours += parseInt(hMatch[1], 10);
+  if (mMatch) minutes = parseInt(mMatch[1], 10);
+  if (sMatch) seconds = parseInt(sMatch[1], 10);
+  
+  const parts = [];
+  
+  if (hours > 0) parts.push(`${hours} ساعة`);
+  if (minutes > 0) parts.push(`${minutes} دقيقة`);
+  if (seconds > 0) parts.push(`${seconds} ثانية`);
+  
+  if (parts.length === 0) return '0 ثانية';
+  
+  return parts.join(' و ');
+};
+
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -304,6 +365,7 @@ export default function App() {
 
   const [stats, setStats] = useState<any>(null);
   const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const previousActiveNeighbors = useRef<Set<string> | null>(null);
 
   // Card Check State
@@ -312,6 +374,77 @@ export default function App() {
   const [isCheckingCard, setIsCheckingCard] = useState(false);
   const [cardResult, setCardResult] = useState<any>(null);
   const [cardError, setCardError] = useState('');
+
+  const fetchStatsData = useCallback(async (showToast = false) => {
+    if (!isLoggedIn) return false;
+    
+    try {
+      const response = await fetch(`/api/mikrotik/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData)
+      });
+      
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const result = await response.json();
+        if (result.success) {
+          setStats(result.data);
+          if (result.data.uptime) {
+            setUptimeSeconds(parseMikrotikUptimeToSeconds(result.data.uptime));
+          }
+          
+          // Check for disconnections
+          if (result.data.activeNeighbors) {
+            const currentActive = new Set<string>(result.data.activeNeighbors);
+            
+            if (previousActiveNeighbors.current) {
+              const disconnectedIps = Array.from(previousActiveNeighbors.current).filter((ip: string) => {
+                if (currentActive.has(ip)) return false;
+                // Only alert for devices that are actually in our topology
+                return TOPOLOGY.some(line => line.devices.some(d => d.ip === ip));
+              });
+              
+              if (disconnectedIps.length > 0) {
+                playDisconnectAlert();
+                disconnectedIps.forEach((ip: string) => {
+                  const deviceName = getDeviceNameByIp(ip);
+                  toast.error(`انقطاع الاتصال: ${deviceName}`, {
+                    description: `القطعة (${ip}) فقدت الاتصال بالشبكة للتو!`,
+                    duration: 10000,
+                  });
+                });
+              }
+            }
+            
+            previousActiveNeighbors.current = currentActive;
+          }
+          
+          if (showToast) {
+            toast.success('تم التحديث بنجاح', { duration: 2000 });
+          }
+          return true;
+        }
+      }
+    } catch (err: any) {
+      console.error('فشل التحديث:', err);
+      if (showToast) {
+        let errorMsg = 'فشل التحديث، يرجى التحقق من الاتصال';
+        if (err.message?.includes('fetch') || err.message?.includes('NetworkError')) {
+          errorMsg = 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو تحديث الصفحة.';
+        }
+        toast.error(errorMsg);
+      }
+    }
+    return false;
+  }, [isLoggedIn, formData]);
+
+  const handleManualRefresh = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRefreshingId(id);
+    await fetchStatsData(true);
+    setRefreshingId(null);
+  };
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -367,51 +500,10 @@ export default function App() {
     const pollData = async () => {
       if (!isLoggedIn) return;
       
-      try {
-        const response = await fetch(`/api/mikrotik/stats`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...formData, deviceIps: DEVICE_IPS })
-        });
-        
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-          const result = await response.json();
-          if (result.success && isMounted) {
-            setStats(result.data);
-            if (result.data.uptime) {
-              setUptimeSeconds(parseMikrotikUptimeToSeconds(result.data.uptime));
-            }
-            
-            // Check for disconnections
-            if (result.data.activeNeighbors) {
-              const currentActive = new Set<string>(result.data.activeNeighbors);
-              
-              if (previousActiveNeighbors.current) {
-                const disconnectedIps = Array.from(previousActiveNeighbors.current).filter(ip => !currentActive.has(ip));
-                
-                if (disconnectedIps.length > 0) {
-                  playDisconnectAlert();
-                  disconnectedIps.forEach(ip => {
-                    const deviceName = getDeviceNameByIp(ip);
-                    toast.error(`انقطاع الاتصال: ${deviceName}`, {
-                      description: `القطعة (${ip}) فقدت الاتصال بالشبكة للتو!`,
-                      duration: 10000,
-                    });
-                  });
-                }
-              }
-              
-              previousActiveNeighbors.current = currentActive;
-            }
-          }
-        }
-      } catch (err) {
-        console.error('فشل التحديث اللحظي للبيانات:', err);
-      } finally {
-        if (isMounted && isLoggedIn) {
-          timeoutId = setTimeout(pollData, 3000);
-        }
+      await fetchStatsData(false);
+      
+      if (isMounted && isLoggedIn) {
+        timeoutId = setTimeout(pollData, 3000);
       }
     };
 
@@ -439,7 +531,7 @@ export default function App() {
       const response = await fetch(`/api/mikrotik/stats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, deviceIps: DEVICE_IPS })
+        body: JSON.stringify(formData)
       });
 
       const contentType = response.headers.get("content-type");
@@ -460,7 +552,11 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'فشل الاتصال بالخادم الداخلي. تأكد من اتصالك بالإنترنت وصحة رابط الخادم.');
+      let errorMsg = err.message || 'فشل الاتصال بالخادم الداخلي. تأكد من اتصالك بالإنترنت وصحة رابط الخادم.';
+      if (errorMsg.includes('fetch') || errorMsg.includes('NetworkError')) {
+        errorMsg = 'فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت أو تحديث الصفحة.';
+      }
+      setError(errorMsg);
     } finally {
       setIsLoading(false);
     }
@@ -667,10 +763,19 @@ export default function App() {
               </div>
 
               {/* Users */}
-              <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col">
-                <div className="flex items-center gap-2 mb-3 text-orange-600">
-                  <Users size={18} />
-                  <span className="text-xs font-bold text-slate-600">إجمالي عدد المتصلين</span>
+              <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col relative">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 text-orange-600">
+                    <Users size={18} />
+                    <span className="text-xs font-bold text-slate-600">إجمالي عدد المتصلين</span>
+                  </div>
+                  <button 
+                    onClick={(e) => handleManualRefresh('total_users', e)}
+                    className="flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors"
+                  >
+                    <RefreshCw size={12} className={cn(refreshingId === 'total_users' && "animate-spin")} />
+                    تحديث
+                  </button>
                 </div>
                 <div className="text-2xl font-black text-slate-900 mt-auto" dir="ltr">
                   {stats?.hotspotActiveCount ?? '0'}
@@ -712,11 +817,18 @@ export default function App() {
                 <div className="space-y-3">
                   {sortedVillages.map((village) => (
                     <div key={village} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                         <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                           <div className="w-1.5 h-4 bg-purple-500 rounded-full" />
                           {village}
                         </h3>
+                        <button 
+                          onClick={(e) => handleManualRefresh(`village_${village}`, e)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors"
+                        >
+                          <RefreshCw size={12} className={cn(refreshingId === `village_${village}` && "animate-spin")} />
+                          تحديث
+                        </button>
                       </div>
                       <div className="divide-y divide-slate-50">
                         {groupedNetworks[village].map((net: any) => (
@@ -748,11 +860,18 @@ export default function App() {
                 <div className="space-y-4">
                   {TOPOLOGY.map((line) => (
                     <div key={line.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100">
+                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                         <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                           <div className="w-1.5 h-4 bg-rose-500 rounded-full" />
                           {line.name}
                         </h3>
+                        <button 
+                          onClick={(e) => handleManualRefresh(`line_${line.id}`, e)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded-md transition-colors"
+                        >
+                          <RefreshCw size={12} className={cn(refreshingId === `line_${line.id}` && "animate-spin")} />
+                          تحديث
+                        </button>
                       </div>
                       <div className="p-4 space-y-3">
                         {line.devices.map((device) => {
@@ -777,8 +896,7 @@ export default function App() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <h4 className="font-bold text-sm text-slate-800 break-words leading-tight">{device.name}</h4>
-                                <div className="text-xs text-slate-500 mt-1 mb-2" dir="ltr">{device.ip}</div>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 mt-2">
                                   <div className="relative flex h-2 w-2">
                                     {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
                                     <span className={cn("relative inline-flex rounded-full h-2 w-2", isOnline ? "bg-emerald-500" : "bg-red-500")}></span>
@@ -799,34 +917,6 @@ export default function App() {
                       </div>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* Logs Section */}
-            {stats?.logs && stats.logs.length > 0 && (
-              <div className="pt-2">
-                <h2 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2 px-1">
-                  <FileText size={20} className="text-blue-500" />
-                  سجل الأحداث (Logs)
-                </h2>
-
-                <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden p-4">
-                  <ol className="list-decimal list-inside space-y-3">
-                    {stats.logs.map((log: any, index: number) => (
-                      <li key={log['.id'] || index} className="text-sm font-medium text-slate-800 leading-relaxed border-b border-slate-50 pb-3 last:border-0 last:pb-0">
-                        <div className="inline-flex items-center gap-2 mr-2">
-                          <span className="text-xs font-bold text-slate-500" dir="ltr">{log.time}</span>
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 uppercase tracking-wider">
-                            {log.topics}
-                          </span>
-                        </div>
-                        <p className="mt-1 mr-6 text-slate-700">
-                          {translateLog(log.message)}
-                        </p>
-                      </li>
-                    ))}
-                  </ol>
                 </div>
               </div>
             )}
@@ -909,31 +999,179 @@ export default function App() {
                       <div className="absolute bottom-0 left-0 w-24 h-24 bg-black/10 rounded-full blur-xl -ml-8 -mb-8"></div>
                       
                       <div className="relative z-10">
-                        <div className="text-indigo-100 text-sm font-medium mb-1">الكرت أبو</div>
-                        <div className="text-3xl font-black mb-6">{cardResult.package}</div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-sm border border-white/10">
-                            <div className="text-indigo-100 text-xs mb-1">الرصيد المتبقي</div>
-                            <div className="font-bold text-lg" dir="ltr">
-                              {cardResult.dataLimit > 0 ? (
-                                formatBytes(Math.max(0, cardResult.dataLimit - cardResult.dataUsed))
+                        {(() => {
+                          const isUnlimited = cardResult.package.includes('8000');
+                          const dataUsed = cardResult.dataUsed;
+                          const dataLimit = cardResult.dataLimit;
+                          const dataRemaining = Math.max(0, dataLimit - dataUsed);
+                          const dataUsedPercentage = dataLimit > 0 ? Math.min(100, Math.max(0, (dataUsed / dataLimit) * 100)) : 0;
+
+                          const timeUsedSec = parseMikrotikUptimeToSeconds(cardResult.timeUsed);
+                          const timeLimitSec = parseMikrotikUptimeToSeconds(cardResult.timeLimit);
+                          const timeRemainingSec = Math.max(0, timeLimitSec - timeUsedSec);
+                          const timeUsedPercentage = timeLimitSec > 0 ? Math.min(100, Math.max(0, (timeUsedSec / timeLimitSec) * 100)) : 0;
+
+                          const circumference = 2 * Math.PI * 36;
+
+                          return (
+                            <>
+                              {isUnlimited ? (
+                                <div className="text-2xl font-black mb-6 text-center mt-2">هذا الكرت مفتوح</div>
                               ) : (
-                                <span className="text-sm">مفتوح (مستخدم: {formatBytes(cardResult.dataUsed)})</span>
+                                <>
+                                  <div className="text-indigo-100 text-sm font-medium mb-1">الكرت أبو</div>
+                                  <div className="text-3xl font-black mb-6">{cardResult.package}</div>
+                                </>
                               )}
-                            </div>
-                          </div>
-                          <div className="bg-white/10 p-3 rounded-2xl backdrop-blur-sm border border-white/10">
-                            <div className="text-indigo-100 text-xs mb-1">الوقت المتبقي</div>
-                            <div className="font-bold text-sm">
-                              {cardResult.timeLimit !== '0s' ? (
-                                formatSecondsToArabicUptime(Math.max(0, parseMikrotikUptimeToSeconds(cardResult.timeLimit) - parseMikrotikUptimeToSeconds(cardResult.timeUsed)))
+                              
+                              <div className="flex flex-col gap-4">
+                                <div className="bg-white/10 p-5 rounded-3xl backdrop-blur-sm border border-white/10 flex items-center justify-between">
+                                  <div className="text-right">
+                                    <div className="text-indigo-100 text-sm mb-1">الرصيد المتبقي</div>
+                                    <div className="font-bold text-2xl" dir="ltr">
+                                      {isUnlimited ? "مفتوح التحميل" : formatBytes(dataRemaining)}
+                                    </div>
+                                  </div>
+                                  {!isUnlimited && (
+                                    <div className="relative flex items-center justify-center w-20 h-20 shrink-0">
+                                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                                        <circle cx="50" cy="50" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-white/10" />
+                                        <motion.circle
+                                          cx="50" cy="50" r="36" stroke="currentColor" strokeWidth="8" fill="transparent"
+                                          strokeDasharray={circumference}
+                                          initial={{ strokeDashoffset: circumference }}
+                                          animate={{ strokeDashoffset: circumference - (dataUsedPercentage / 100) * circumference }}
+                                          transition={{ duration: 1.5, ease: "easeOut" }}
+                                          className={dataUsedPercentage < 80 ? "text-emerald-400" : "text-rose-400"}
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-sm font-bold">{Math.round(dataUsedPercentage)}%</span>
+                                        <span className="text-[9px] text-indigo-100 -mt-1">مستخدم</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="bg-white/10 p-5 rounded-3xl backdrop-blur-sm border border-white/10 flex items-center justify-between">
+                                  <div className="text-right">
+                                    <div className="text-indigo-100 text-sm mb-1">الوقت المتبقي</div>
+                                    <div className="font-bold text-xl">
+                                      {isUnlimited ? "مفتوح الوقت" : formatSecondsToArabicUptime(timeRemainingSec)}
+                                    </div>
+                                  </div>
+                                  {!isUnlimited && (
+                                    <div className="relative flex items-center justify-center w-20 h-20 shrink-0">
+                                      <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                                        <circle cx="50" cy="50" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-white/10" />
+                                        <motion.circle
+                                          cx="50" cy="50" r="36" stroke="currentColor" strokeWidth="8" fill="transparent"
+                                          strokeDasharray={circumference}
+                                          initial={{ strokeDashoffset: circumference }}
+                                          animate={{ strokeDashoffset: circumference - (timeUsedPercentage / 100) * circumference }}
+                                          transition={{ duration: 1.5, ease: "easeOut", delay: 0.2 }}
+                                          className={timeUsedPercentage < 80 ? "text-sky-400" : "text-rose-400"}
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span className="text-sm font-bold">{Math.round(timeUsedPercentage)}%</span>
+                                        <span className="text-[9px] text-indigo-100 -mt-1">مستخدم</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {isUnlimited && (
+                                <div className="mt-6 text-center text-indigo-100 text-sm font-medium bg-white/10 py-3 px-4 rounded-xl backdrop-blur-sm border border-white/10">
+                                  هذا الكرت خاص بمالك هذه الشبكه
+                                </div>
+                              )}
+
+                              {cardResult.sessionHistory && cardResult.sessionHistory.length > 0 ? (
+                                <div className="mt-8 bg-slate-50/50 p-4 rounded-[2rem] border border-slate-100">
+                                  <h4 className="text-sm font-bold text-slate-700 mb-4 flex items-center gap-2 px-2">
+                                    <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl">
+                                      <History size={16} />
+                                    </div>
+                                    آخر عشر اتصالات لهذا الكرت
+                                  </h4>
+                                  <div className="space-y-3">
+                                    {cardResult.sessionHistory.map((session: any, idx: number) => {
+                                      const formattedStartTime = formatMikrotikTime(session.startTime);
+                                      const formattedEndTime = formatMikrotikTime(session.endTime);
+                                      const formattedUptime = formatUptimeArabic(session.uptime);
+                                      
+                                      return (
+                                        <motion.div 
+                                          key={idx}
+                                          initial={{ opacity: 0, y: 10 }}
+                                          animate={{ opacity: 1, y: 0 }}
+                                          transition={{ delay: idx * 0.05 }}
+                                          className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow"
+                                        >
+                                          <div className="flex items-center justify-between mb-4">
+                                            <div className="flex items-center gap-3">
+                                              <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+                                                <MapPin size={20} />
+                                              </div>
+                                              <div className="text-right">
+                                                <div className="font-bold text-slate-800 text-sm">{session.site}</div>
+                                              </div>
+                                            </div>
+                                            <div className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-3 py-1.5 rounded-xl border border-emerald-100 flex items-center gap-1.5">
+                                              <Clock size={12} />
+                                              {formattedUptime}
+                                            </div>
+                                          </div>
+                                          
+                                          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-50">
+                                            <div className="bg-slate-50 p-2.5 rounded-2xl text-right">
+                                              <div className="text-[9px] text-slate-400 mb-1 flex items-center gap-1 justify-end">
+                                                <LogOut size={10} className="text-rose-400" />
+                                                وقت الخروج
+                                              </div>
+                                              <div className="flex flex-col items-end">
+                                                <div className="text-xs font-bold text-slate-700 bg-white px-2 py-1 rounded-lg border border-slate-100 shadow-sm inline-block" dir="ltr">
+                                                  {formattedEndTime.time}
+                                                </div>
+                                                {formattedEndTime.date && (
+                                                  <div className="text-[9px] text-slate-400 mt-1">{formattedEndTime.date}</div>
+                                                )}
+                                              </div>
+                                            </div>
+                                            <div className="bg-slate-50 p-2.5 rounded-2xl text-right">
+                                              <div className="text-[9px] text-slate-400 mb-1 flex items-center gap-1 justify-end">
+                                                <Clock size={10} className="text-indigo-400" />
+                                                وقت الدخول
+                                              </div>
+                                              <div className="flex flex-col items-end">
+                                                <div className="text-xs font-bold text-slate-700 bg-white px-2 py-1 rounded-lg border border-slate-100 shadow-sm inline-block" dir="ltr">
+                                                  {formattedStartTime.time}
+                                                </div>
+                                                {formattedStartTime.date && (
+                                                  <div className="text-[9px] text-slate-400 mt-1">{formattedStartTime.date}</div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </motion.div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               ) : (
-                                <span className="text-xs">مفتوح (مستخدم: {formatSecondsToArabicUptime(parseMikrotikUptimeToSeconds(cardResult.timeUsed))})</span>
+                                <div className="mt-8 p-6 bg-slate-50 rounded-3xl border border-dashed border-slate-200 text-center">
+                                  <History size={32} className="mx-auto text-slate-300 mb-2" />
+                                  <p className="text-sm font-bold text-slate-500">لا يوجد سجل جلسات لهذا الكرت حالياً</p>
+                                  <p className="text-[10px] text-slate-400 mt-1">قد يكون الكرت جديداً أو لم يتم استخدامه بعد</p>
+                                </div>
                               )}
-                            </div>
-                          </div>
-                        </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
                   </motion.div>
