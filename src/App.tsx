@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle, ChevronRight, MessageCircle, FileText, RefreshCw, MapPin, History } from 'lucide-react';
+import { Activity, Clock, Cpu, Server, LogIn, AlertCircle, LogOut, Users, Network, Wifi, ShieldAlert, CheckCircle2, XCircle, ChevronRight, FileText, RefreshCw, MapPin, History, MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Toaster, toast } from 'sonner';
 import { cn, parseMikrotikUptimeToSeconds, formatSecondsToArabicUptime } from './lib/utils';
@@ -357,8 +357,8 @@ export default function App() {
   const [error, setError] = useState('');
   
   const [formData, setFormData] = useState({
-    host: 'remote.alnooah.pro',
-    port: '21153',
+    host: 'us-2.hostddns.us',
+    port: '5548',
     username: 'salah',
     password: ''
   });
@@ -366,6 +366,61 @@ export default function App() {
   const [stats, setStats] = useState<any>(null);
   const [uptimeSeconds, setUptimeSeconds] = useState<number | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const whatsappEnabled = true; // Always enabled
+  const [whatsappPhone, setWhatsappPhone] = useState(() => localStorage.getItem('whatsapp_phone') || '967770932655');
+  const [whatsappApiKey, setWhatsappApiKey] = useState(() => localStorage.getItem('whatsapp_api_key') || '8489896');
+
+  const whatsappEnabledRef = useRef(whatsappEnabled);
+  const whatsappPhoneRef = useRef(whatsappPhone);
+  const whatsappApiKeyRef = useRef(whatsappApiKey);
+
+  // Sync settings to server background task
+  const syncSettingsToBackground = useCallback(async (enabledOverride?: boolean) => {
+    // Allow syncing if logged in OR if we are explicitly disabling (logout)
+    if (!isLoggedIn && enabledOverride !== false) return;
+    
+    try {
+      await fetch('/api/settings/background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: enabledOverride !== undefined ? enabledOverride : whatsappEnabled,
+          host: formData.host,
+          port: formData.port,
+          username: formData.username,
+          password: formData.password,
+          whatsappPhone: whatsappPhone,
+          whatsappApiKey: whatsappApiKey
+        })
+      });
+      console.log("[Background] Settings synced to server successfully");
+    } catch (e) {
+      console.error("[Background] Failed to sync settings:", e);
+    }
+  }, [isLoggedIn, whatsappEnabled, whatsappPhone, whatsappApiKey, formData]);
+
+  useEffect(() => {
+    whatsappEnabledRef.current = whatsappEnabled;
+    if (isLoggedIn) syncSettingsToBackground();
+  }, [whatsappEnabled, isLoggedIn, syncSettingsToBackground]);
+
+  useEffect(() => {
+    whatsappPhoneRef.current = whatsappPhone;
+    localStorage.setItem('whatsapp_phone', whatsappPhone);
+    if (isLoggedIn) syncSettingsToBackground();
+  }, [whatsappPhone, isLoggedIn, syncSettingsToBackground]);
+
+  useEffect(() => {
+    whatsappApiKeyRef.current = whatsappApiKey;
+    localStorage.setItem('whatsapp_api_key', whatsappApiKey);
+    if (isLoggedIn) syncSettingsToBackground();
+  }, [whatsappApiKey, isLoggedIn, syncSettingsToBackground]);
+
+  // Sync when formData changes (e.g. host/username) while logged in
+  useEffect(() => {
+    if (isLoggedIn) syncSettingsToBackground();
+  }, [formData, isLoggedIn, syncSettingsToBackground]);
+
   const previousActiveNeighbors = useRef<Set<string> | null>(null);
 
   // Card Check State
@@ -413,6 +468,35 @@ export default function App() {
                     description: `القطعة (${ip}) فقدت الاتصال بالشبكة للتو!`,
                     duration: 10000,
                   });
+
+                  // Send WhatsApp notification if enabled
+                  if (whatsappEnabledRef.current) {
+                    console.log(`[WhatsApp] Disconnection detected for ${deviceName}. Sending notification...`);
+                    fetch('/api/notify/whatsapp', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        deviceName,
+                        phone: whatsappPhoneRef.current,
+                        apikey: whatsappApiKeyRef.current
+                      })
+                    })
+                    .then(async (res) => {
+                      const data = await res.json();
+                      if (data.success) {
+                        console.log(`[WhatsApp] Notification sent successfully for ${deviceName}`);
+                      } else {
+                        console.error(`[WhatsApp] Failed to send notification:`, data.error, data.details);
+                        toast.error('فشل إرسال تنبيه واتساب', { description: data.error });
+                      }
+                    })
+                    .catch(err => {
+                      console.error('WhatsApp Notification Fetch Error:', err);
+                      toast.error('خطأ في الاتصال بخدمة التنبيهات');
+                    });
+                  } else {
+                    console.log(`[WhatsApp] Notification skipped for ${deviceName} (WhatsApp disabled)`);
+                  }
                 });
               }
             }
@@ -547,6 +631,8 @@ export default function App() {
           setUptimeSeconds(parseMikrotikUptimeToSeconds(result.data.uptime));
         }
         setIsLoggedIn(true);
+        // Sync settings to background after successful login
+        setTimeout(() => syncSettingsToBackground(), 500);
       } else {
         setError(result.error || 'حدث خطأ غير معروف');
       }
@@ -563,6 +649,8 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // Disable background monitoring on logout
+    syncSettingsToBackground(false);
     setIsLoggedIn(false);
     setStats(null);
     setUptimeSeconds(null);
@@ -719,12 +807,14 @@ export default function App() {
                 <span className="text-sm font-bold text-slate-900">رعد نت</span>
               </div>
             </div>
-            <button 
-              onClick={handleLogout}
-              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors active:scale-95"
-            >
-              <LogOut size={22} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleLogout}
+                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors active:scale-95"
+              >
+                <LogOut size={22} />
+              </button>
+            </div>
           </div>
 
           <motion.div 
