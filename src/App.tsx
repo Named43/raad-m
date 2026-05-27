@@ -357,8 +357,8 @@ export default function App() {
   const [error, setError] = useState('');
   
   const [formData, setFormData] = useState({
-    host: 'us-2.hostddns.us',
-    port: '5548',
+    host: 'remote.alnooah.pro',
+    port: '21153',
     username: 'salah',
     password: ''
   });
